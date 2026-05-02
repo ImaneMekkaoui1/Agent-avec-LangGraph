@@ -1,114 +1,80 @@
-Rapport de TP : Agent Intelligent avec LangGraph
-Module : Systèmes Multi-Agents (SMA) et IAD
+# Rapport de TP : Agent Intelligent avec LangGraph
 
-Formation : Master SDIA
+**Module :** Systèmes Multi-Agents (SMA) et IAD  
+**Formation :** Master SDIA  
+**Encadré par :** Prof. RETAL SARA  
 
-Encadré par : Prof. RETAL SARA
+---
 
-🎯 Objectif du TP
-Ce travail pratique a pour objectif de concevoir un agent intelligent capable de raisonnement autonome en utilisant LangGraph. L'accent est mis sur la transition d'un modèle de langage passif vers un système dynamique capable de :
+## 🎯 Objectif
 
-Interagir avec des outils externes (Tools).
+Ce TP a pour objectif de découvrir la construction d’agents intelligents avec **LangGraph** en combinant :
 
-Gérer un état conversationnel complexe via un graphe d'états.
+- Un **LLM local** (Llama 3.2 via Ollama)
+- Des **tools** (fonctions Python externes)
+- Un **workflow orienté graphe** (StateGraph)
+- Le mécanisme **HITL (Human-In-The-Loop)** pour la validation humaine
+- La **sauvegarde d’état** (Checkpoints) et la **reprise d’exécution** (Time Travel)
 
-Intégrer une validation humaine avant action (Human-In-The-Loop).
+---
 
-Gérer la persistance, la reprise après interruption et le "Time Travel" (modification d'états passés).
+## 📋 Table des matières
+1. [Partie 1 : LLM local avec outils (Tools)](#partie-1)
+2. [Partie 2 : Agent comme nœud de LangGraph](#partie-2)
+3. [Partie 3 : Workflow HITL (Human-In-The-Loop)](#partie-3)
+4. [Partie 4 : Agent Avancé, Persistance et Forking](#partie-4)
 
-📋 Table des matières
-Configuration du LLM local et des Outils
+---
 
-Construction de l'Agent comme Graphe
+## 🛠 Partie 1 : LLM local avec outils (Tools) <a name="partie-1"></a>
 
-Workflow avec Validation Humaine (HITL)
+L'étape initiale consiste à définir les capacités de notre agent. Nous utilisons `langchain_ollama` pour piloter un modèle local et `@tool` pour exposer des fonctions arithmétiques.
 
-Agent Avancé : Persistance, Interruption et Forking
+**Fichier : `tools_setup.py`**
+- **Modèle utilisé :** `llama3.2:3b`
+- **Outils :** Addition, Multiplication, Division.
+- **Principe :** Le modèle est "lié" aux outils via `bind_tools`, ce qui lui permet de générer des requêtes d'appel de fonctions au lieu de simples réponses textuelles.
 
-🛠 Partie 1 : LLM local avec outils (Tools) 
-Dans cette étape, nous configurons un modèle Llama 3.2 via Ollama et définissons des outils mathématiques simples que le modèle pourra appeler.
+---
 
-Points clés :
+## 🧠 Partie 2 : Agent comme nœud de LangGraph <a name="partie-2"></a>
 
-Utilisation du décorateur @tool pour transformer des fonctions Python en outils exploitables par le LLM.
+Ici, nous définissons l'architecture cyclique de l'agent. Contrairement à une chaîne linéaire, l'agent peut boucler sur lui-même tant qu'il estime avoir besoin d'outils.
 
-Liaison des outils au modèle via model.bind_tools().
+### Composants clés :
+- **AgentState :** Un dictionnaire typé qui maintient l'historique des messages et un compteur `llm_calls`.
+- **Nœud `llm_call` :** Appelle le LLM pour décider de la prochaine action.
+- **Nœud `tool_node` :** Exécute les fonctions si le LLM a généré des `tool_calls`.
+- **Arête conditionnelle `should_continue` :** Détermine si le flux doit aller vers l'exécution d'un outil ou se terminer (`END`).
 
-Python
-# Extrait du fichier tools_setup.py
-@tool
-def add(a: int, b: int) -> int:
-    """Ajoute deux entiers."""
-    return a + b
+---
 
-tools = [add, multiply, divide]
-model_with_tools = model.bind_tools(tools)
-🧠 Partie 2 : Agent comme nœud de LangGraph 
-L'agent est ici structuré comme un StateGraph. Contrairement à une simple chaîne, le graphe permet des cycles (boucles de réflexion).
+## ⏳ Partie 3 : Workflow HITL (Human-In-The-Loop) <a name="partie-3"></a>
 
-Structure de l'État (AgentState)
-L'état est l'objet qui circule entre les nœuds. Il contient :
+Cette partie introduit la validation humaine dans le workflow. Grâce aux décorateurs `@task` et `@entrypoint`, nous créons un flux capable de s'interrompre.
 
-messages : L'historique des échanges (avec concaténation automatique via Annotated[list, add]).
+- **Mécanisme :** La fonction `interrupt()` met le graphe en pause.
+- **Persistance :** `InMemorySaver` permet de mémoriser l'état à l'endroit exact de l'interruption.
+- **Reprise :** L'exécution reprend via `Command(resume=True)`, permettant à l'humain de valider le contenu généré avant sa finalisation.
 
-llm_calls : Un compteur pour suivre l'activité du modèle.
+---
 
-Les Nœuds du Graphe
-llm_call : Le cerveau de l'agent qui décide s'il faut répondre ou appeler un outil.
+## 🚀 Partie 4 : Agent Avancé, Persistance et Forking <a name="partie-4"></a>
 
-tool_node : L'exécuteur qui traite les demandes d'outils et renvoie les résultats.
+Le TP final implémente un agent complet capable de gérer des erreurs, des refus humains et des retours dans le passé.
 
-should_continue : La logique conditionnelle qui oriente le flux.
+### Fonctionnalités avancées :
+1. **Gestionnaire de sauvegarde (Checkpointer) :** Chaque étape est enregistrée sous un `thread_id`. Cela permet de fermer l'application et de reprendre plus tard.
+2. **Nœud d'approbation (`approve_node`) :** Une étape de contrôle qui intercepte les appels d'outils avant leur exécution réelle.
+3. **Time Travel & Forking :** - Nous récupérons l'historique des états via `get_state_history`.
+   - Nous pouvons "forker" (bifurquer) à partir d'un état ancien en utilisant `update_state`, ce qui permet de tester différents scénarios à partir d'un même point de départ.
 
-⏳ Partie 3 : Workflow avec Validation Humaine (HITL) 
-Cette partie introduit le concept de Human-In-The-Loop. Le workflow s'arrête (interrupt) pour permettre à un humain d'approuver ou de rejeter une action.
+### Exemple de processus de Forking :
+```python
+# Récupération d'un checkpoint précédent dans l'historique
+history = list(agent.get_state_history(config))
+old_state = history[1]
 
-@task : Isole une unité d'exécution.
-
-@entrypoint : Définit le point d'entrée du workflow avec un gestionnaire de sauvegarde (checkpointer).
-
-Python
-@entrypoint(checkpointer=InMemorySaver())
-def workflow(topic: str) -> dict:
-    draft = write_essay(topic).result()
-    # Le graphe s'arrête ici et attend une action externe
-    approved = interrupt({"draft": draft, "action": "approve or reject"})
-    return {"draft": draft, "approved": approved}
-🚀 Partie 4 : Agent Avancé (Persistance et Time Travel) 
-La dernière partie combine toutes les fonctionnalités pour créer un agent robuste capable de gérer des scénarios de production.
-
-Fonctionnalités implémentées :
-Persistance (Checkpointer) : Utilisation de InMemorySaver pour sauvegarder chaque étape du graphe dans un thread_id.
-
-Interruption Systématique : L'agent s'arrête avant chaque exécution d'outil (approve_node) pour demander une confirmation.
-
-Reprise d'exécution : Utilisation de Command(resume=True/False) pour relancer le graphe après une interruption.
-
-Modification d'état (Forking) : Capacité de récupérer un état passé (get_state_history), de le modifier (update_state) et de relancer l'agent à partir de cette nouvelle branche.
-
-Exemple de processus de Forking :
-Python
-# Récupération d'un checkpoint précédent
-history = list(agent.get_state_history(config_reject))
-picked = history[1]
-
-# Création d'un nouvel état modifié (Fork)
-new_config = agent.update_state(picked.config, values={"messages": [...]})
-forked = agent.invoke(None, new_config)
-🧪 Comment tester le projet
-Prérequis :
-
-Installer Ollama et télécharger Llama 3.2 (ollama run llama3.2).
-
-Installer les dépendances : pip install langgraph langchain_ollama.
-
-Exécution :
-
-Lancer les scripts pour observer le streaming des messages.
-
-Tester l'interruption en fournissant une réponse à l'agent lorsqu'il est en pause.
-
-Consulter l'historique des checkpoints pour vérifier la persistance.
-
-📌 Conclusion
-Ce TP a permis de comprendre que le développement d'agents ne se limite pas à l'envoi de prompts. Grâce à LangGraph, nous avons pu implémenter une logique de contrôle fine, garantissant la fiabilité des agents via la persistance et l'intervention humaine, éléments essentiels pour des systèmes d'IA distribués et robustes.
+# Création d'une nouvelle branche d'exécution
+new_config = agent.update_state(old_state.config, values={"messages": [...]})
+agent.invoke(None, new_config)
