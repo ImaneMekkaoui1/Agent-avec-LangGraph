@@ -6,75 +6,160 @@
 
 ---
 
-## 🎯 Objectif
+## Résumé
+
+Ce TP présente la conception d’un agent intelligent basé sur **LangGraph**.
+
+L’agent est capable de :
+
+- raisonner de manière itérative,
+- appeler automatiquement des outils externes,
+- interrompre son exécution pour validation humaine,
+- reprendre après interruption,
+- conserver un historique complet de ses états,
+- revenir à un ancien état pour explorer d’autres trajectoires d’exécution.
+
+L’objectif principal est de comprendre comment transformer un simple modèle de langage en un **agent structuré, contrôlable et traçable**.
+
+---
+
+## Objectif
 
 Ce TP a pour objectif de découvrir la construction d’agents intelligents avec **LangGraph** en combinant :
 
-- Un **LLM local** (Llama 3.2 via Ollama)
-- Des **tools** (fonctions Python externes)
-- Un **workflow orienté graphe** (StateGraph)
-- Le mécanisme **HITL (Human-In-The-Loop)** pour la validation humaine
-- La **sauvegarde d’état** (Checkpoints) et la **reprise d’exécution** (Time Travel)
+- un **LLM local** (Llama 3.2 via Ollama),
+- des **tools** (fonctions Python externes),
+- un **workflow orienté graphe** (`StateGraph`),
+- le mécanisme **HITL (Human-In-The-Loop)** pour la validation humaine,
+- la **sauvegarde d’état** (*checkpoints*),
+- la **reprise d’exécution** (*time travel*).
 
 ---
 
-## 📋 Table des matières
-1. [Partie 1 : LLM local avec outils (Tools)](#partie-1)
-2. [Partie 2 : Agent comme nœud de LangGraph](#partie-2)
-3. [Partie 3 : Workflow HITL (Human-In-The-Loop)](#partie-3)
-4. [Partie 4 : Agent Avancé, Persistance et Forking](#partie-4)
+## Table des matières
+
+1. [Environnement technique](#environnement-technique)
+2. [Architecture globale](#architecture-globale)
+3. [Partie 1 : LLM local avec outils (Tools)](#partie-1--llm-local-avec-outils-tools)
+4. [Partie 2 : Agent comme nœud de LangGraph](#partie-2--agent-comme-nœud-de-langgraph)
+5. [Partie 3 : Workflow HITL (Human-In-The-Loop)](#partie-3--workflow-hitl-human-in-the-loop)
+6. [Partie 4 : Agent avancé, persistance et forking](#partie-4--agent-avancé-persistance-et-forking)
+7. [Résultats obtenus](#résultats-obtenus)
+8. [Concepts appris](#concepts-appris)
+9. [Conclusion](#conclusion)
 
 ---
 
-## 🛠 Partie 1 : LLM local avec outils (Tools) <a name="partie-1"></a>
+## Environnement technique
 
-L'étape initiale consiste à définir les capacités de notre agent. Nous utilisons `langchain_ollama` pour piloter un modèle local et `@tool` pour exposer des fonctions arithmétiques.
+### Technologies utilisées
 
-**Fichier : `tools_setup.py`**
-- **Modèle utilisé :** `llama3.2:3b`
-- **Outils :** Addition, Multiplication, Division.
-- **Principe :** Le modèle est "lié" aux outils via `bind_tools`, ce qui lui permet de générer des requêtes d'appel de fonctions au lieu de simples réponses textuelles.
+| Technologie | Rôle |
+|---|---|
+| Python | Langage principal |
+| LangGraph | Orchestration du workflow |
+| LangChain | Gestion du LLM et des tools |
+| Ollama | Exécution locale du modèle |
+| Llama 3.2 | Modèle de langage |
+| python-dotenv | Chargement des variables d’environnement |
 
----
+### Installation
 
-## 🧠 Partie 2 : Agent comme nœud de LangGraph <a name="partie-2"></a>
+```bash
+uv venv
+uv pip install langgraph langchain langchain-ollama python-dotenv 
+````
+### Téléchargement du modèle local
 
-Ici, nous définissons l'architecture cyclique de l'agent. Contrairement à une chaîne linéaire, l'agent peut boucler sur lui-même tant qu'il estime avoir besoin d'outils.
+```
+ollama pull llama3.2:3b
+````
+### Architecture globale
 
-### Composants clés :
-- **AgentState :** Un dictionnaire typé qui maintient l'historique des messages et un compteur `llm_calls`.
-- **Nœud `llm_call` :** Appelle le LLM pour décider de la prochaine action.
-- **Nœud `tool_node` :** Exécute les fonctions si le LLM a généré des `tool_calls`.
-- **Arête conditionnelle `should_continue` :** Détermine si le flux doit aller vers l'exécution d'un outil ou se terminer (`END`).
+L’agent suit le cycle suivant :
+```
+Utilisateur
+   ↓
+LLM
+   ↓
+Décision :
+outil nécessaire ?
+   ├── Non → réponse finale
+   └── Oui
+          ↓
+      validation humaine
+          ↓
+      exécution du tool
+          ↓
+      retour au LLM
+```
+Cette architecture permet :
 
----
+* une prise de décision progressive,
+* un contrôle humain,
+* une traçabilité complète de l’exécution
 
-## ⏳ Partie 3 : Workflow HITL (Human-In-The-Loop) <a name="partie-3"></a>
+# Partie 1 — LLM local avec outils (Tools)
+Nous définissons les capacités de l’agent dans tools_setup.py.
+Les outils sont des fonctions Python pures que le LLM peut invoquer.
+```@tool
+def multiply(a: int, b: int) -> int:
+    """Multiply two integers."""
+    return a * b
+```
+Le modèle est ensuite lié à ces outils via model.bind_tools(tools), 
+lui permettant de structurer ses sorties pour appeler ces fonctions.
 
-Cette partie introduit la validation humaine dans le workflow. Grâce aux décorateurs `@task` et `@entrypoint`, nous créons un flux capable de s'interrompre.
+# Partie 2 — Agent comme nœud de LangGraph
+Ici, nous définissons le cœur du système sous forme de StateGraph.
 
-- **Mécanisme :** La fonction `interrupt()` met le graphe en pause.
-- **Persistance :** `InMemorySaver` permet de mémoriser l'état à l'endroit exact de l'interruption.
-- **Reprise :** L'exécution reprend via `Command(resume=True)`, permettant à l'humain de valider le contenu généré avant sa finalisation.
+- AgentState : Un dictionnaire qui maintient la mémoire de l'agent (messages) et des métadonnées (compteur d'appels LLM).
 
----
+- Nœud llm_call : Invoque le LLM avec le contexte actuel.
 
-## 🚀 Partie 4 : Agent Avancé, Persistance et Forking <a name="partie-4"></a>
+- Nœud tool_node : Exécute les appels d'outils détectés dans les messages du LLM.
 
-Le TP final implémente un agent complet capable de gérer des erreurs, des refus humains et des retours dans le passé.
+- Cycle : Le graphe utilise des arêtes conditionnelles pour décider s'il doit continuer à utiliser des outils ou s'arrêter.
 
-### Fonctionnalités avancées :
-1. **Gestionnaire de sauvegarde (Checkpointer) :** Chaque étape est enregistrée sous un `thread_id`. Cela permet de fermer l'application et de reprendre plus tard.
-2. **Nœud d'approbation (`approve_node`) :** Une étape de contrôle qui intercepte les appels d'outils avant leur exécution réelle.
-3. **Time Travel & Forking :** - Nous récupérons l'historique des états via `get_state_history`.
-   - Nous pouvons "forker" (bifurquer) à partir d'un état ancien en utilisant `update_state`, ce qui permet de tester différents scénarios à partir d'un même point de départ.
+# Partie 3 — Workflow HITL (Human-In-The-Loop)
+Cette partie implémente la sécurité via l'interruption. Le workflow utilise les décorateurs @task et @entrypoint de LangGraph.
 
-### Exemple de processus de Forking :
-```python
-# Récupération d'un checkpoint précédent dans l'historique
-history = list(agent.get_state_history(config))
-old_state = history[1]
+* Fonction interrupt() : Met l'exécution en pause et attend une entrée utilisateur.
 
-# Création d'une nouvelle branche d'exécution
-new_config = agent.update_state(old_state.config, values={"messages": [...]})
-agent.invoke(None, new_config)
+* Checkpointer : Utilise InMemorySaver() pour sauvegarder l'état du thread, permettant de reprendre l'exécution avec Command(resume=True) sans perdre le contexte.
+
+# Partie 4 — Agent avancé, persistance et forking
+La phase finale combine l'autonomie et le contrôle total sur l'historique :
+
+* Persistance des Threads : Chaque conversation possède un thread_id unique.
+
+* Contrôle d'Action : Un nœud approve_node intercepte les intentions du LLM, affiche les outils qu'il souhaite utiliser, et attend un "OK" humain.
+
+* Time Travel & Forking :
+
+   - Nous explorons l'historique via agent.get_state_history(config).
+
+   - Nous pouvons "remonter le temps" vers un état précédent, modifier un message ou une variable, et relancer une nouvelle branche             d'exécution (Fork).
+ 
+* Résultats obtenus
+L'agent développé est capable de :
+
+- Gérer des calculs arithmétiques complexes de manière autonome.
+
+- Afficher son raisonnement en streaming (mode updates ou messages).
+
+- Garantir qu'aucune action externe n'est effectuée sans validation humaine.
+
+- Gérer des sessions multiples grâce à la persistance.
+
+## Concepts appris
+* Programmation Orientée Graphe : Gérer la logique de l'IA via des nœuds et des arêtes.
+
+* Human-In-The-Loop : Intégrer l'humain comme une étape critique du workflow.
+
+* Gestion d'État (State Management) : Manipuler l'historique et les variables de session de manière immuable.
+
+* Persistance : Sauvegarder et restaurer des états d'agent.
+
+## Conclusion
+Ce TP démontre la puissance de LangGraph pour orchestrer des systèmes d'IA complexes. En dépassant le simple chat, nous avons créé un agent capable de collaborer avec l'humain tout en utilisant des outils de manière structurée et sécurisée.
